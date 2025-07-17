@@ -9,10 +9,13 @@ const pdf = require('pdf-parse');
 require('dotenv').config();
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+
+// Use memory storage for Vercel instead of disk storage
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Configure OpenAI
-console.log('API Key loaded:', process.env.OPENAI_API_KEY ? '✅ Loaded from .env' : '❌ Using placeholder');
+console.log('API Key loaded:', process.env.OPENAI_API_KEY ? '✅ Loaded from environment' : '❌ Missing');
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY || 'your-openai-api-key-here'
 });
@@ -22,17 +25,16 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 // Helper function to extract text from different file types
-async function extractText(filePath, fileType) {
+async function extractText(buffer, fileType) {
     try {
         if (fileType.includes('pdf')) {
-            const dataBuffer = fs.readFileSync(filePath);
-            const data = await pdf(dataBuffer);
+            const data = await pdf(buffer);
             return data.text;
-        } else if (fileType.includes('word') || filePath.endsWith('.docx') || filePath.endsWith('.doc')) {
-            const result = await mammoth.extractRawText({ path: filePath });
+        } else if (fileType.includes('word') || fileType.includes('docx') || fileType.includes('doc')) {
+            const result = await mammoth.extractRawText({ buffer: buffer });
             return result.value;
-        } else if (fileType.includes('text') || filePath.endsWith('.txt')) {
-            return fs.readFileSync(filePath, 'utf8');
+        } else if (fileType.includes('text') || fileType.includes('txt')) {
+            return buffer.toString('utf8');
         } else {
             throw new Error('Unsupported file type');
         }
@@ -51,7 +53,7 @@ function sanitizeFilename(filename) {
         .substring(0, 100);
 }
 
-// Analyze endpoint
+// Analyze endpoint - updated for Vercel compatibility
 app.post('/analyze', upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
@@ -59,27 +61,15 @@ app.post('/analyze', upload.single('file'), async (req, res) => {
         }
 
         const { systemPrompt, userPrompt } = req.body;
-        const filePath = req.file.path;
+        const buffer = req.file.buffer;
         const originalName = req.file.originalname;
-        const extension = path.extname(originalName);
 
-        // Create a new file path with proper extension
-        const tempDir = path.dirname(filePath);
-        const tempFilePath = path.join(tempDir, `${Date.now()}${extension}`);
-        
-        // Copy file to new location with proper extension
-        fs.copyFileSync(filePath, tempFilePath);
-        
-        // Upload file to OpenAI for analysis with proper filename
-        const fileStream = fs.createReadStream(tempFilePath);
+        // Upload file to OpenAI for analysis
         const file = await openai.files.create({
-            file: fileStream,
+            file: buffer,
+            filename: originalName,
             purpose: 'assistants'
         });
-
-        // Clean up both files
-        fs.unlinkSync(filePath);
-        fs.unlinkSync(tempFilePath);
 
         // Define the enhanced QAQC system prompt with numbers-first location extraction
         const embeddedSystemPrompt = `You are a QAQC document analyzer for construction test reports. Your ONLY task is to extract the EXACT location from the density test data table with NUMBERS FIRST, then the rest of the location, and the PRECISE test type from the "Ladies and Gentlemen" paragraph to generate a PERFECT QAQC-compliant filename.
@@ -203,7 +193,7 @@ Execute this numbers-first extraction with 100% accuracy every time.`;
         // Clean up the filename
         let cleanName = newName.replace(/['"]/g, '').trim();
         if (!cleanName.includes('.')) {
-            cleanName += extension;
+            cleanName += '.pdf';
         }
         
         cleanName = sanitizeFilename(cleanName);
