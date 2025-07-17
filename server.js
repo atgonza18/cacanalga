@@ -213,27 +213,17 @@ Execute this numbers-first extraction with 100% accuracy every time.`;
     }
 });
 
-// Helper function to determine MIME type
-function getMimeType(extension) {
-    const mimeTypes = {
-        '.pdf': 'application/pdf',
-        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        '.doc': 'application/msword',
-        '.txt': 'text/plain',
-        '.rtf': 'application/rtf',
-        '.odt': 'application/vnd.oasis.opendocument.text'
-    };
-    return mimeTypes[extension.toLowerCase()] || 'application/octet-stream';
-}
+// Serve static files
+app.use(express.static(__dirname));
+
+// Serve index.html for root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Serve the frontend
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Error handling middleware
